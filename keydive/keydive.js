@@ -312,6 +312,40 @@ function readDerKey(address, size) {
     return buffer.slice(0, size);
 }
 
+// Track DER key buffers already dumped to avoid re-sending the same key on every call
+const dumpedKeys = new Set();
+
+function readRsaPrivateKey(address) {
+    /*
+    Reads a DER-encoded RSA private key pointed to directly by the given address,
+    validating the structure before and while dereferencing:
+      - DER SEQUENCE with a 2-byte long-form length (0x30 0x82)
+      - A size plausible for a 2048 or 4096-bit RSA private key
+      - A leading version INTEGER (02 01 00), shared by PKCS#1 and PKCS#8 keys;
+        this excludes certificates, which continue with a nested SEQUENCE
+     */
+    if (address.isNull() || address.compare(ptr(0x10000)) < 0) return null;
+
+    let head;
+    try {
+        head = new Uint8Array(address.readByteArray(8));
+    } catch (e) {
+        return null;
+    }
+
+    if (head[0] !== 0x30 || head[1] !== 0x82) return null;
+
+    const size = ((head[2] << 8) | head[3]) + 4;
+    if (size < 600 || size > 4000) return null;
+    if (head[4] !== 0x02 || head[5] !== 0x01 || head[6] !== 0x00) return null;
+
+    try {
+        return address.readByteArray(size);
+    } catch (e) {
+        return null;
+    }
+}
+
 function disableLibrary(name) {
     // Disables all functions in the specified library by replacing their implementations.
     const library = getLibrary(name);
@@ -824,20 +858,40 @@ function Level3_RewrapDeviceRSAKey30(address, name) {
     Interceptor.attach(address, {
         onEnter: function (args) {
             try {
+                let dumped = false;
+
+                // Primary path: enc_rsa_key buffer with an adjacent size pointer (signature above)
                 const bufferPtr = args[5];
                 const sizePtr = args[6];
 
-                if (sizePtr.isNull() || bufferPtr.isNull()) return;
-                if (bufferPtr.compare(ptr(0x10000)) < 0) return;
+                if (!sizePtr.isNull() && !bufferPtr.isNull() && bufferPtr.compare(ptr(0x10000)) >= 0) {
+                    // Check if the size matches a potential 2048 or 4096-bit RSA private key (range 1190-2350)
+                    const size = sizePtr.toInt32();
+                    if (size >= 1000 && size <= 2400) {
+                        const bufferData = readDerKey(bufferPtr, size);
+                        if (bufferData) {
+                            print(Level.DEBUG, `[*] Level3_RewrapDeviceRSAKey30: ${name}`);
+                            send({'private_key': name}, bufferData);
+                            dumped = true;
+                        }
+                    }
+                }
 
-                // Check if the size matches a potential 2048 or 4096-bit RSA private key (range 1190-2350)
-                const size = sizePtr.toInt32();
-                if (size < 1000 || size > 2400) return;
-
-                const bufferData = readDerKey(bufferPtr, size);
-                if (bufferData) {
-                    print(Level.DEBUG, `[*] Level3_RewrapDeviceRSAKey30: ${name}`);
-                    send({'private_key': name}, bufferData);
+                // Fallback: the argument position of the plaintext RSA key varies between
+                // OEMCrypto builds, so scan every argument as a direct pointer to a DER key
+                // https://github.com/emizuki/wvdump
+                if (!dumped) {
+                    for (let i = 0; i < 10; i++) {
+                        const bufferData = readRsaPrivateKey(args[i]);
+                        if (bufferData) {
+                            const unique = `${args[i]}:${bufferData.byteLength}`;
+                            if (!dumpedKeys.has(unique)) {
+                                dumpedKeys.add(unique);
+                                print(Level.DEBUG, `[*] Level3_RewrapDeviceRSAKey30: ${name} (arg ${i})`);
+                                send({'private_key': name}, bufferData);
+                            }
+                        }
+                    }
                 }
             } catch (e) { /* not a real RewrapDeviceRSAKey30 call */ }
         }

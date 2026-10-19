@@ -10,6 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Clear error message when `keydive.js` is executed outside of Frida, e.g., with Windows Script Host.
 - Diagnostic details (function, export, and symbol counts) to the "Insufficient functions hooked" error.
+- Fallback scan of every hook argument for DER-encoded RSA private keys when the documented `enc_rsa_key` buffer/size pair is not found, adapting to OEMCrypto builds with different signatures.
+
+### Changed
+
+- The private key fallback rejects DER structures that are not RSA private keys (e.g., certificates) by checking the leading version INTEGER.
 
 ## [3.0.6] - 2026-04-28
 
