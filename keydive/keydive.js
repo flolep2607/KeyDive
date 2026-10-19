@@ -2,7 +2,20 @@
  * Date: 2026-06-14
  * Description: DRM key extraction for research and educational purposes.
  * Source: https://github.com/hyugogirubato/KeyDive
+ *
+ * This file is a Frida script template. The KeyDive Python client injects it
+ * into a process and replaces the placeholders below at runtime. It cannot be
+ * run standalone (e.g., with Windows Script Host or Node.js).
  */
+
+// Abort early with a clear message when executed outside of Frida
+// https://github.com/hyugogirubato/KeyDive/issues/72
+if (typeof send !== 'function' || typeof Process === 'undefined') {
+    throw new Error(
+        'This is a Frida script template loaded by the KeyDive Python client. ' +
+        'Do not execute it directly; run the `keydive` command instead.'
+    );
+}
 
 // Placeholder values dynamically replaced at runtime.
 const OEM_CRYPTO_API = JSON.parse('${OEM_CRYPTO_API}');
@@ -926,7 +939,26 @@ const hookLibrary = (name, dynamic) => {
     });
 
     if (required.size < 3) {
-        print(Level.CRITICAL, 'Insufficient functions hooked');
+        // Report why the hook attempt failed to make bug reports actionable
+        // https://github.com/hyugogirubato/KeyDive/issues/71
+        let exports = 0;
+        let symbols = 0;
+        try {
+            exports = library.enumerateExports().length;
+            if (dynamic) symbols = library.enumerateSymbols().length;
+        } catch (e) { /* counts are best-effort diagnostics */ }
+
+        print(Level.CRITICAL, (
+            `Insufficient functions hooked: ${required.size} of 3 required ` +
+            `(library: ${name}, functions found: ${functions.length}, hooked: ${hooked.size}, ` +
+            `exports: ${exports}, symbols: ${symbols}, provided symbols: ${Object.keys(SYMBOLS).length}, ` +
+            `dynamic enumeration: ${dynamic})`
+        ));
+
+        if (!Object.keys(SYMBOLS).length && exports === 0 && symbols === 0) {
+            print(Level.DEBUG, 'The library exposes no functions; it may be stripped or hardened. ' +
+                'Extract the function offsets with Ghidra and retry with the "--symbols" option.');
+        }
         return false;
     }
 

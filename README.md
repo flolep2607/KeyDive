@@ -52,6 +52,9 @@ This will automatically install and launch the recommended DRM test app (Kaltura
 > [!TIP]  
 > This sequence ensures that the DRM-protected content is active and ready for key extraction by the time the KeyDive script is initiated, optimizing the extraction process.
 
+> [!NOTE]  
+> The `keydive/keydive.js` file is an internal Frida script template. It is populated with runtime values and injected into the target process by the Python client; it cannot be executed standalone.
+
 ### Command-Line Options
 
 ````shell
